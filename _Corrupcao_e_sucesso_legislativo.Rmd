@@ -1,0 +1,539 @@
+---
+title: "Corrupção e sucesso legislativo"
+output: html_document
+---
+
+O presente documento estrutura base de dados com proposições (PL, PLP e PEC) convertidas em lei nos períodos Lula 1, Lula 2 e Dilma 1. O objetivo principal é investigar a possível influência do envolvimento de parlamentares em esquemas de corrupção (Mensalão e Lava-Jato) no sucesso da conversão de proposições em lei. 
+
+Os dados de proposições são carregados a partir do portal Transparência da Câmara dos Deputados, seção Dados Abertos.
+
+Os resultados e análises constituirão material para a elaboração de artigo científico, como parte das atividades do GPE.2.13 - BASES DE DADOS PÚBLICAS DO PODER LEGISLATIVO.
+
+### Definição do período e dos tipos de proposição
+
+```{r}
+tprop <- c("PL","PLP","PEC") # tipos de proposicoes
+periodo <- 2003:2015
+```
+
+### Base de proposições (`r paste0(tprop, collapse =" e ")`) referentes ao período `r paste0(periodo[1],"-",periodo[length(periodo)])`
+
+O código a seguir efetua a leitura dos dados de proposições. Na primeira execução, a leitura é lenta e feita  ano-a-ano, por meio do método GET (http) direcionado ao portal Transparência da Câmara dos Deputados, e consolidada em arquivo CSV cujo nome contém os tipos de proposições e o período determinado. Nas execuções posteriores, a leitura é direta a partir do arquivo gerado.
+
+```{r}
+library(XML)
+
+propPeriodo <- c()     # data frame para as proposições do período
+arq <- paste0(paste0(tprop, collapse ="-"),"_",periodo[1],"-",periodo[length(periodo)],".csv")
+
+if(file.exists(arq)){
+  propPeriodo <- read.csv(arq, sep=";")
+} else{
+  for(sigla in tprop){
+    for(ano in periodo){
+      # consulta URL dos Dados Abertos da Câmara dos Deputados
+      url <- paste0(
+        "http://www.camara.leg.br/SitCamaraWS/Proposicoes.asmx/ListarProposicoes?sigla=",sigla,
+        "&numero=&ano=",ano,
+        "&datApresentacaoIni=&datApresentacaoFim=&parteNomeAutor=&idTipoAutor=&siglaPartidoAutor=",
+        "&siglaUFAutor=&generoAutor=&codEstado=&codOrgaoEstado=&emTramitacao="
+      )
+      # print(url)
+      readlines <- readLines(url, warn = FALSE)
+      propPeriodo <- rbind(propPeriodo, xmlToDataFrame(readlines))
+    }
+  }
+  write.csv2(propPeriodo, arq)
+}
+```
+
+```{r, echo=FALSE}
+sprintf("Arquivo %s: %d observações e %d variáveis",arq, nrow(propPeriodo), ncol(propPeriodo))
+rm(periodo, arq)
+```
+
+### Leitura dos dados de proposições por legislatura (52, 53, 54)
+
+Neste ponto, os dados de proposições são lidos legislatura-a-legislatura. Na primeira execução são feitos *downloads* dos arquivos a partir do portal Transparência da Câmara dos Deputados e consolidados os dados em arquivo CSV cujo nome contém os tipos de proposições e as legislaturas. Nas execuções posteriores, a leitura é direta a partir do arquivo  gerado.
+
+```{r, echo=FALSE}
+suppressPackageStartupMessages(library(jsonlite))
+```
+
+```{r}
+leg <- c(52, 53, 54)  # vetor de legislaturas
+dfLeg <- c()          # dataframe das proposioes de cada legislatura
+propLeg <- c()        # dataframe para com todas as proposicoes das legislaturas
+arq <- paste0(paste0(tprop, collapse ="-"),"_Leg",paste0(leg, collapse = ""),".csv")
+
+if(file.exists(arq)){
+  propLeg <- read.csv(arq, sep=";")
+} else {
+  for(i in leg){
+    url <- paste0("http://www.camara.gov.br/internet/arquivosDadosAbertos/proposicoesdalegislatura",i,".zip")
+    fzip <- strsplit(url,"/")[[1]][6]
+    download.file(url,fzip)
+    unzip(fzip)
+    readlines <- readLines(paste(strsplit(fzip,".zip")[[1]][1],".json",sep=""), warn = FALSE)
+    dfLeg <- fromJSON(readlines)
+    dfLeg <- data.frame(dfLeg)
+    propLeg <- rbind(propLeg, dfLeg)
+  }
+  # subtrai o prefixo data. do nome das colunas
+  names(propLeg) <- sub("data.", "", names(propLeg))
+  # converte os campos para fatores
+  for(i in 1:ncol(propLeg)){
+    propLeg[[i]] <- as.factor(propLeg[[i]])
+  }
+
+  write.csv2(propLeg, arq)
+}
+```
+
+```{r, echo=FALSE}
+sprintf("Arquivo %s: %d observações e %d variáveis", arq, nrow(propLeg), ncol(propLeg))
+rm(dfLeg, arq)
+```
+
+Aplicação de filtro excluindo projetos cujo tipo é "HOMENAGENS E DATAS COMEMORATIVAS" e cujo tipo do autor seja diferente de "DEPUTADO" e "SENADOR".
+
+```{r}
+propLegEstudo <- propLeg[
+                  propLeg$SIG_TIPO_PROPOSICAO %in% tprop &
+                  (propLeg$DES_TIPO_AUTOR == "DEPUTADO" | propLeg$DES_TIPO_AUTOR == "SENADOR") &
+                   propLeg$AREAS_TEMATICAS_APRESENTACAO != "HOMENAGENS E DATAS COMEMORATIVAS" 
+                  ,
+                  ]
+```
+
+```{r, echo=FALSE}
+sprintf("Proposições registros resultantes: %d", nrow(propLegEstudo))
+sprintf("Quantidade de proposições (código único): %d", length(levels(as.factor(as.character(propLegEstudo$NOM_PROPOSICAO)))))
+sprintf("Quantidade de variáveis: %d", ncol(propLegEstudo))
+
+```
+
+Combina os dataframes propLegEstudo e propPeriodo de forma a incluir o campo "txtEmenta"
+
+```{r}
+propLegEstudo <- merge(propLegEstudo, propPeriodo[ , c("id","nome","txtEmenta") ], by.x = "NOM_PROPOSICAO", by.y = "nome", all.x=TRUE)
+dim(propLegEstudo)
+```
+
+Inclusão da numeração da proposição no Senado Federal, quando for o caso.
+
+```{r}
+matSFCD <- read.csv("MateriasSFCD.csv", sep=";")
+
+propLegEstudo <- merge(propLegEstudo, matSFCD[ , c("NOM_PROPOSICAO_SF","NOM_PROPOSICAO_CD") ], by.x = "NOM_PROPOSICAO", by.y = "NOM_PROPOSICAO_CD", all.x=TRUE)
+
+dim(propLegEstudo)
+```
+
+Aplicação de filtro de expressões regulares para encontrar projetos de baixo impacto.
+
+```{r}
+# converte para maiúsculas
+propLegEstudo$txtEmenta <- toupper(propLegEstudo$txtEmenta)
+
+# verifica as expressões sem impacto
+# http://stat545.com/block022_regular-expression.html
+sa<-sapply(propLegEstudo$txtEmenta, function(x){
+          grepl("DENOMINA.+?PRAÇA", x, perl=TRUE) |
+          grepl("DENOMINA.+?RODOVIA", x, perl=TRUE) |
+          grepl("DENOMINA.+?AEROPORTO", x, perl=TRUE) | 
+          grepl("DENOMINA.+?PONTE", x, perl=TRUE) |
+          grepl("DENOMINA.+?VIADUTO", x, perl=TRUE) |
+          grepl('INSTITUI.+?[ "]DIA ', x, perl=TRUE) |
+          grepl("INSTITUI.+?SEMANA", x, perl=TRUE) |
+          grepl('INSTITUI.+?[ "]M[ÊE]S ', x, perl=TRUE) |
+          grepl('INSTITUI.+?[ "]ANO ', x, perl=TRUE) |
+          grepl("INSTITUI.+?D[ÉE]CADA", x, perl=TRUE) |  
+          grepl("INSTITUI.+?PR[ÊE]MIO", x, perl=TRUE) |  
+          grepl("PENSÃO.+?ESPECIAL", x, perl=TRUE) |  
+          grepl("NOVA.+?DENOMINAÇÃO", x, perl=TRUE) |  
+          grepl("HOMENAG+", x, perl=TRUE)
+    }
+)
+propLegEstudo$BAIXO_IMPACTO <- as.vector(sa)
+```
+
+```{r, echo=FALSE}
+sprintf("Identificadas %d proposições de baixo impacto", sum(sa))
+propLegEstudo[propLegEstudo$BAIXO_IMPACTO, "txtEmenta"]
+```
+
+Inclusão do indicador de convresão em lei.
+```{r}
+propLegEstudo$IND_CONVERSAO_LEI <- !is.na(propLegEstudo$DAT_FIM_LEGISLATURA_LEI)
+```
+
+Remoção das proposições de baixo impacto e delimitação das variáveis de análise.
+
+```{r}
+propLegEstudo <- propLegEstudo[!propLegEstudo$BAIXO_IMPACTO, 
+                         c("NOM_PROPOSICAO",
+                           "NOM_PROPOSICAO_SF",
+                           "ANO_PROPOSICAO",
+                           "NUM_LEGISLATURA_APRESEN",
+                           "NOM_PARLAMENTAR",
+                           "NOM_CIVIL_PARLAMENTAR",
+                           "SIG_TIPO_PROPOSICAO",
+                           "DES_TIPO_PARLAMENTAR",
+                           "DES_TIPO_AUTOR",
+                           "DES_TIPO_NORMA_JURIDICA",
+                           "SIG_PARTIDO_POLITICO",
+                           "SIG_UF",
+                           "AREAS_TEMATICAS_APRESENTACAO",
+                           "DES_SITUACAO_PROPOSICAO",
+                           "DAT_FIM_LEGISLATURA_LEI",
+                           "IND_CONVERSAO_LEI",
+                           "txtEmenta"
+                           )]
+dim(propLegEstudo)
+```
+
+Exclusão das proposições cujo nome aparece em branco.
+
+```{r}
+# exclusão das proposições em branco
+propLegEstudo <- propLegEstudo[propLegEstudo$NOM_PROPOSICAO != "", ]
+
+dim(propLegEstudo)
+```
+
+Exclusão de 42 projetos honoríficos identificados manualmente.
+
+```{r}
+# exclusão dos 42 honoríficos
+honorificos <- read.csv("Honorificos42.csv", header = FALSE)
+names(honorificos) <- "NOM_PROPOSICAO"
+
+# propLegEstudo <- read.csv("PL-PLP_Leg525354_estudo.csv", sep=";")
+
+propLegEstudo <- propLegEstudo[!(propLegEstudo$NOM_PROPOSICAO %in% honorificos$NOM_PROPOSICAO), ]
+dim(propLegEstudo)
+```
+
+Taxa de conversão de projetos de lei em normas jurídicas.
+
+```{r}
+sum(propLegEstudo$IND_CONVERSAO_LEI) / nrow(propLegEstudo)
+```
+
+Inclusão do campo coalizão. Dados de coalizão disponíveis no Banco de Dados Legislativos do Cebrap (http://neci.fflch.usp.br).
+
+```{r}
+if(!require(stringr)) { install.packages('stringr') }
+
+# corrige sigla do solidariedade para SDD
+propLegEstudo[propLegEstudo$SIG_PARTIDO_POLITICO == "SD", "SIG_PARTIDO_POLITICO"] <- "SDD"
+
+coalizoes <- read.csv("Coalizoes.csv", sep=";", colClasses="character")
+
+propLegEstudo$COALIZAO <- NULL
+
+for(i in 1:nrow(coalizoes)){
+  propLegEstudo[ (propLegEstudo$SIG_PARTIDO_POLITICO %in%
+                    strsplit(str_to_upper(coalizoes$Partido[i]),">")[[1]]) &
+                  propLegEstudo$ANO_PROPOSICAO == coalizoes$Ano[i],
+                 "COALIZAO"] <- coalizoes$Coalizao[i]
+}
+
+colSums(is.na(propLegEstudo))
+
+table(propLegEstudo$COALIZAO)
+```
+
+```{r, echo=FALSE}
+if(!require(RCurl)) { install.packages('RCurl') }
+
+retira_acentos <- function(txt) {
+  txt %>%
+    str_trim %>%
+    str_to_lower %>%
+    str_replace_all("à", "a") %>%
+    str_replace_all("á", "a") %>%
+    str_replace_all("ã", "a") %>%
+    str_replace_all("â", "a") %>%
+    str_replace_all("é", "e") %>%
+    str_replace_all("ê", "e") %>%
+    str_replace_all("í", "i") %>%
+    str_replace_all("ó", "o") %>%
+    str_replace_all("õ", "o") %>%
+    str_replace_all("ô", "o") %>%
+    str_replace_all("ú", "u") %>%
+    str_replace_all("ü", "u") %>%
+    str_replace_all("ç", "c") %>%
+    str_to_upper
+}
+
+```
+
+Inclusão de indicadores de corrupção do Mensalão a partir da [Ação Penal 470 Minas Gerais](http://www.stf.jus.br/portal/cms/verNoticiaDetalhe.asp?idConteudo=236494) (campo "AP470MG") e da lista divulgada pelo ministro do STF [Teori Zavascki](http://infograficos.oglobo.globo.com/brasil/politicos-lava-jato.html) (campo "FLAG_TEORI").
+ 
+```{r}
+# Mensalão
+# https://noticias.uol.com.br/ultnot/2007/08/28/ult23u530.jhtm
+#http://g1.globo.com/politica/mensalao/noticia/2012/12/stf-determina-perda-de-mandatos-de-deputados-condenados-por-mensalao.html
+# http://www.stf.jus.br/portal/cms/verNoticiaDetalhe.asp?idConteudo=236494
+
+# lista AP470MG
+AP470 <- read.csv("Lista_Mensalao.csv", sep=";", header=TRUE)
+AP470 <- AP470[AP470$CONDENADO,]
+AP470$NOME <- retira_acentos(AP470$NOME)
+propLegEstudo$NOM_PARLAMENTAR <- retira_acentos(propLegEstudo$NOM_PARLAMENTAR)
+
+# nomes do mensalão que não aparecem na lista de proposições
+# AP470$NOME[!(AP470$NOME %in% propLegEstudo$NOM_PARLAMENTAR)]
+# sum(propLegEstudo$NOM_PARLAMENTAR %in% AP470$NOME)
+# str_to_lower(levels(as.factor(propLegEstudo$NOM_PARLAMENTAR)))
+
+propLegEstudo <- merge(propLegEstudo, AP470[,c("NOME","CONDENADO")], by.x = "NOM_PARLAMENTAR", by.y = "NOME", all.x=TRUE)
+propLegEstudo$CONDENADO <- !is.na(propLegEstudo$CONDENADO) # substitui NAs por FALSE
+
+# lista Teori Zavascki
+STF <- read.csv("Lista_TeoriLavaJato.csv",sep=";",header=TRUE)
+STF$NOME <- retira_acentos(STF$NOME)
+propLegEstudo <- merge(propLegEstudo, STF[,c("NOME","FLAG_TEORI")], by.x = "NOM_PARLAMENTAR", by.y = "NOME", all.x=TRUE)
+propLegEstudo$FLAG_TEORI <- !is.na(propLegEstudo$FLAG_TEORI) # substitui NAs por FALSE
+
+propLegEstudo$IND_CORRUPCAO <- ( as.integer(propLegEstudo$CONDENADO) +
+                                  as.integer(propLegEstudo$FLAG_TEORI)
+                                ) > 0
+
+
+```
+
+Inclusão de indicadores de corrupção a partir da lista apresentada pelo relator da Lava-Jato à época, ministro [Fachin](https://noticias.uol.com.br/politica/ultimas-noticias/2017/04/11/lava-jato-fachin-abre-inquerito-contra-ministros-senadores-e-deputados-diz-jornal.htm).
+
+```{r}
+# Lista Ministro Fachin
+FAC <- read.csv("Lista_Fachin.csv", sep=";", header=TRUE)
+FAC <- FAC[FAC$NOM_PARLAMENTAR != "", ]
+FAC$NOM_PARLAMENTAR <- retira_acentos(FAC$NOM_PARLAMENTAR)
+propLegEstudo <- merge(propLegEstudo, FAC[,c("NOM_PARLAMENTAR","FLAG_FACHIN")], by.x = "NOM_PARLAMENTAR", by.y = "NOM_PARLAMENTAR", all.x=TRUE)
+propLegEstudo$FLAG_FACHIN <- !is.na(propLegEstudo$FLAG_FACHIN) # substitui NAs por FALSE
+
+propLegEstudo$IND_CORRUPCAO <- ( as.integer(propLegEstudo$CONDENADO) +
+                                  as.integer(propLegEstudo$FLAG_TEORI) +
+                                  as.integer(propLegEstudo$FLAG_FACHIN)  
+                                   ) > 0
+```
+
+```{r, echo=FALSE}
+# renomeando campos para facilitar formulas de regressao
+names(propLegEstudo)[5] <- "NUM_LEGISLATURA"
+names(propLegEstudo)[13] <- "AREA_TEMATICA"
+```
+
+Regressão Logística 1 - Modelo: IND_CONVERSAO_LEI ~ IND_CORRUPCAO
+
+```{r, echo=FALSE}
+
+lrfit1 <- glm(IND_CONVERSAO_LEI ~ IND_CORRUPCAO, data = propLegEstudo, family = binomial)
+s <- summary(lrfit1)
+# os coeficientes devem ser significativos: coeficientes NÃO significativos (p > 0.05): 
+s
+
+p <- 1-pchisq(s$deviance,s$df.residual)
+if(p < 0.05){
+  msg <- "NÃO ATENDIDO"
+} else {
+  msg <- "ATENDIDO"
+}
+sprintf("Não deve existir diferença significativa entre modelo saturado e modelo proposto: %s (p = %e)", msg, p)
+
+p <- 1-pchisq(s$null.deviance - s$deviance, s$df.null - s$df.residual)
+if(p > 0.05){
+  msg <- "NÃO ATENDIDO"
+} else {
+  msg <- "ATENDIDO"
+}
+sprintf("Desvio nulo e desvio residual devem ser estatisticamente diferentes: %s (p = %e)", msg, p)
+
+sprintf("Razão das chances: beta0 = %7.4f e beta1 = %7.4f", exp(s$coefficients[1]), exp(s$coefficients[2]))
+
+```
+
+Verificada a significância de IND_CORRUPCAO como fator explicativo da conversão de projetos em lei, novas variáveis foram testadas como causa concorrente: SIG_TIPO_PROPOSICAO, NUM_LEGISLATURA_APRESEN, COALIZAO e AREAS_TEMATICAS_APRESENTACAO.
+
+Observa-se que o tipo da proposição não tem significância na explicação do fenômeno.
+
+```{r, echo=FALSE}
+
+add1(lrfit1, ~ . + SIG_TIPO_PROPOSICAO + NUM_LEGISLATURA + COALIZAO + AREA_TEMATICA, test="Chisq")
+
+```
+
+Regressão Logística 2 - Modelo: IND_CONVERSAO_LEI ~ IND_CORRUPCAO + NUM_LEGISLATURA
+
+Adicionando-se, inicialmente, a Legislatura como variável de controle, o indicador de corrupção manteve-se significativo, assim como os coeficientes para as legislaturas 52 e 54. Destaca-se que exatamente nessas legislaturas foram deflagrados, respectivamente, os esquemnas do Mensalão e da Lava Jato. 
+
+```{r, echo=FALSE}
+
+propLegEstudo$NUM_LEGISLATURA <- as.factor(propLegEstudo$NUM_LEGISLATURA)
+
+lrfit2 <- glm(IND_CONVERSAO_LEI ~ IND_CORRUPCAO + NUM_LEGISLATURA,
+             data = propLegEstudo, family = binomial)
+s <- summary(lrfit2)
+# os coeficientes devem ser significativos: coeficientes NÃO significativos (p > 0.05): 
+s
+
+p <- 1-pchisq(s$deviance,s$df.residual)
+if(p < 0.05){
+  msg <- "NÃO ATENDIDO"
+} else {
+  msg <- "ATENDIDO"
+}
+sprintf("Não deve existir diferença significativa entre modelo saturado e modelo proposto: %s (p = %e)", msg, p)
+
+
+p <- 1-pchisq(s$null.deviance - s$deviance, s$df.null - s$df.residual)
+if(p > 0.05){
+  msg <- "NÃO ATENDIDO"
+} else {
+  msg <- "ATENDIDO"
+}
+sprintf("Desvio nulo e desvio residual devem ser estatisticamente diferentes: %s (p = %e)", msg, p)
+
+# Razão das chances
+sprintf("Razão das chances:")
+rchances <- round(exp(lrfit2$coefficients),4)
+sprintf("exp(%s) = %s", names(rchances), as.character(rchances))
+```
+
+Regressão Logística 3 - Modelo: IND_CONVERSAO_LEI ~ IND_CORRUPCAO + COALIZAO
+
+Efetuando-se o teste somente com a adição do campo COALIZAO.
+
+```{r, echo=FALSE}
+
+# retira registros sem informação da COALIZAO com funcao na.exclude
+
+lrfit3 <- glm(IND_CONVERSAO_LEI ~ IND_CORRUPCAO + COALIZAO, data = propLegEstudo, family = binomial, NULL, NULL, na.exclude)
+s <- summary(lrfit3)
+# os coeficientes devem ser significativos: coeficientes NÃO significativos (p > 0.05): 
+s
+
+p <- 1-pchisq(s$deviance,s$df.residual)
+if(p < 0.05){
+  msg <- "NÃO ATENDIDO"
+} else {
+  msg <- "ATENDIDO"
+}
+sprintf("Não deve existir diferença significativa entre modelo saturado e modelo proposto: %s (p = %e)", msg, p)
+
+
+p <- 1-pchisq(s$null.deviance - s$deviance, s$df.null - s$df.residual)
+if(p > 0.05){
+  msg <- "NÃO ATENDIDO"
+} else {
+  msg <- "ATENDIDO"
+}
+sprintf("Desvio nulo e desvio residual devem ser estatisticamente diferentes: %s (p = %e)", msg, p)
+
+# Razão das chances
+sprintf("Razão das chances:")
+rchances <- round(exp(lrfit3$coefficients),4)
+sprintf("exp(%s) = %s", names(rchances), as.character(rchances))
+```
+
+Regressão Logística 4 - Modelo: IND_CONVERSAO_LEI ~ IND_CORRUPCAO + NUM_LEGISLATURA_APRESEN + COALIZAO
+
+```{r, echo=FALSE}
+
+lrfit4 <- glm(IND_CONVERSAO_LEI ~ IND_CORRUPCAO + NUM_LEGISLATURA + COALIZAO, data = propLegEstudo, family = binomial, NULL, NULL, na.exclude)
+s <- summary(lrfit4)
+# os coeficientes devem ser significativos: coeficientes NÃO significativos (p > 0.05): 
+s
+
+p <- 1-pchisq(s$deviance,s$df.residual)
+if(p < 0.05){
+  msg <- "NÃO ATENDIDO"
+} else {
+  msg <- "ATENDIDO"
+}
+sprintf("Não deve existir diferença significativa entre modelo saturado e modelo proposto: %s (p = %e)", msg, p)
+
+
+p <- 1-pchisq(s$null.deviance - s$deviance, s$df.null - s$df.residual)
+if(p > 0.05){
+  msg <- "NÃO ATENDIDO"
+} else {
+  msg <- "ATENDIDO"
+}
+sprintf("Desvio nulo e desvio residual devem ser estatisticamente diferentes: %s (p = %e)", msg, p)
+
+
+# Razão das chances
+sprintf("Razão das chances:")
+rchances <- round(exp(lrfit4$coefficients),4)
+sprintf("exp(%s) = %s", names(rchances), as.character(rchances))
+```
+
+Comparação dos modelos aninhados.
+
+```{r}
+anova(lrfit4, test="Chisq")
+```
+
+Projetos de lei convertidos em norma jurídica cujos autores apresentam IND_CORRUPCAO = TRUE
+
+```{r, echo=FALSE}
+df <- propLegEstudo[propLegEstudo$IND_CONVERSAO_LEI & propLegEstudo$IND_CORRUPCAO, c("NOM_PROPOSICAO", "DAT_FIM_LEGISLATURA_LEI","AREA_TEMATICA")]
+rownames(df) <- 1:nrow(df)
+df
+dim(df)
+```
+
+
+Inclusão de outros possíveis indicadores de corrupção ([ver lista de operações da PF](https://pt.wikipedia.org/wiki/Lista_de_opera%C3%A7%C3%B5es_da_Pol%C3%ADcia_Federal_do_Brasil)).
+
+```{r}
+# elaborar lista semelhante às anteriores
+
+```
+
+Salva arquivo de corrupção.
+```{r, echo=FALSE}
+arq <- paste0(paste0(tprop, collapse ="-"),"_Leg",paste0(leg, collapse = ""),"_estudo.csv")
+write.csv2(propLegEstudo, arq)
+
+sprintf("Arquivo final %s: %d observações e %d variáveis", arq, nrow(propLegEstudo), ncol(propLegEstudo))
+rm(tprop, leg)
+```
+
+CORRUPÇÃO - ARTIGOS  
+http://www.scielo.br/scielo.php?script=sci_arttext&pid=S0104-62762016000100093&lang=pt  
+http://www.scielo.br/scielo.php?script=sci_arttext&pid=S0034-76122016000200237&lang=pt  
+http://www.scielo.br/scielo.php?script=sci_arttext&pid=S0104-530X2016005006104&lang=pt  
+
+CORRUPÇÃO - NOTÍCIAS
+
+[Lista 1](http://infograficos.oglobo.globo.com/brasil/politicos-lava-jato.html)  
+[Lista 2](http://www1.folha.uol.com.br/poder/2015/03/1599447-teori-divulga-lista-com-54-investigados-da-lava-jato.shtml)  
+[Lista 3](http://www1.folha.uol.com.br/especial/2012/ojulgamentodomensalao/ojulgamento/os_acusados.shtml)  
+[Lista 4](http://occalertabrasil.blogspot.com.br/2014/09/e-hora-de-cumprir-o-art142-o-petrolao.html)
+
+PLANILHAS - Oderbrecht e Petrobras  
+http://www1.folha.uol.com.br/poder/2016/03/1753226-pf-acha-planilha-de-pagamentos-da-odebrecht-para-politicos.shtml  
+http://politica.estadao.com.br/blogs/fausto-macedo/veja-a-lista-de-politicos-na-contabilidade-da-odebrecht/  
+http://politica.estadao.com.br/blogs/fausto-macedo/veja-a-lista-de-politicos-na-contabilidade-da-odebrecht/  
+http://g1.globo.com/politica/operacao-lava-jato/noticia/2014/12/ex-diretor-da-petrobras-citou-nomes-de-28-politicos-em-delacao-diz-jornal.html  
+http://istoe.com.br/381282_MENSALAO+DA+PETROBRAS/  
+
+
+DADOS ABERTOS - CÂMARA  
+http://www2.camara.leg.br/transparencia/dados-abertos/dados-abertos-legislativo/webservices/proposicoes-1  
+http://www.camara.leg.br/buscaProposicoesWeb/pesquisaSimplificada?numero=7361&ano=2006&tipoproposicao=%5BPL+-+Projeto+de+Lei%5D&emtramitacao=Todas&data=20/07/2016&page=false  
+
+DADOS ABERTOS - SENADO  
+http://dadosabertos.senado.gov.br/dataset/lista-detalhada-de-materias-por-ano  
+http://dadosabertos.senado.gov.br/dataset/lista-de-materias-em-tramitacao-no-senado  
+http://legis.senado.leg.br/dadosabertos/docs/resource_PesquisaMateriaService.html#resource_PesquisaMateriaService_materiaListaPesquisa_GET  
+http://legis.senado.leg.br/dadosabertos/materia/pesquisa/lista?sigla=pls&ano=2013  
+
+
+
+
