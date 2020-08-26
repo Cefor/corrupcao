@@ -12,3 +12,8 @@ Contribuir para a elucidação de possível efeito da corrupção no sucesso leg
 
 ## Análise de Dados
 ["Corrupcao_e_sucesso_legislativo.html"](http://htmlpreview.github.com/?https://github.com/Cefor/corrupcao/blob/master/_Corrupcao_e_sucesso_legislativo.html)
+
+## Link para o artigo 
+(E-Legis, V. 13 N. 33 Set./Dez. 2020)
+
+[CORRUPÇÃO E SUCESSO LEGISLATIVO: POSSÍVEIS REFLEXOS DO MENSALÃO E DA LAVA JATO NA CONVERSÃO DE PROPOSIÇÕES EM NORMAS JURÍDICAS](http://e-legis.camara.leg.br/cefor/index.php/e-legis/article/view/584)
