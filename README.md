@@ -17,3 +17,7 @@ Contribuir para a elucidação de possível efeito da corrupção no sucesso leg
 (E-Legis, V. 13 N. 33 Set./Dez. 2020)
 
 [CORRUPÇÃO E SUCESSO LEGISLATIVO: POSSÍVEIS REFLEXOS DO MENSALÃO E DA LAVA JATO NA CONVERSÃO DE PROPOSIÇÕES EM NORMAS JURÍDICAS](http://e-legis.camara.leg.br/cefor/index.php/e-legis/article/view/584)
+
+## Grupo de Pesquisa
+
+Pesquisa realizada no âmbito do grupo [Ciência de Dados Aplicada ao Estudo do Poder Legislativo: abordagem computacional e métodos de análise](http://dgp.cnpq.br/dgp/espelhogrupo/9712095383739020)
